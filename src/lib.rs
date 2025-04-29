@@ -2,18 +2,20 @@ use error::SolanaClientExtError;
 use solana_client::{rpc_client, rpc_config::RpcSimulateTransactionConfig};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{
-    account::AccountSharedData,
-    compute_budget::ComputeBudgetInstruction,
+    account::{feature_set::FeatureSet, fee::FeeStructure, AccountSharedData},
     message::Message,
     signers::Signers,
     transaction::{SanitizedTransaction, Transaction},
     transaction_context::TransactionContext,
 };
 
+use solana_bpf_loader_program::syscalls::create_program_runtime_environment_v1;
+use solana_compute_budget::compute_budget::ComputeBudget;
+use solana_svm::message_processor::process_message;
 use {
     solana_program_runtime::{
         invoke_context::{self, EnvironmentConfig, InvokeContext},
-        loaded_programs::{ProgramCacheForTxBatch, ProgramRuntimeEnvironments},
+        loaded_programs::{sysvar_cache, ProgramCacheForTxBatch, ProgramRuntimeEnvironments},
     },
     solana_svm_transaction::svm_message::SVMMessage,
     solana_timings::{ExecuteDetailsTimings, ExecuteTimings},
@@ -74,6 +76,25 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
         // Get Invoke context
         let mut transaction_context = TransactionContext::new(accounts_data, Rent::default(), 0, 0);
 
+        let compute_budget = ComputeBudget::default();
+        let feature_set = FeatureSet::all_enabled();
+        let fee_structure = FeeStructure::default();
+        let lamports_per_signature = fee_structure.lamports_per_signature;
+        let sysvar_c = sysvar_cache::SysvarCache::default();
+        let env = EnvironmentConfig::new(
+            Hash::default(),
+            None,
+            None,
+            Arc::new(feature_set),
+            lamports_per_signature,
+            &sysvar_c,
+        );
+
+        let runtime_env = Arc::new(
+            create_program_runtime_environment_v1(&feature_set, &compute_budget, false, false)
+                .unwrap(),
+        );
+
         //Get prog_cache
         let mut prog_cache = ProgramCacheForTxBatch::new(
             Slot::default(), //Slot
@@ -87,12 +108,11 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
         );
 
         let mut invoke_context = InvokeContext::new(
-            &mut transaction_context,             //&'a mut TransactionContext,,
-            &mut prog_cache,                      //&'a mut ProgramCacheForTxBatch,
-            env,                                  //EnvironmentConfig<'a>,
-            None,                                 //Option<Rc<RefCell<LogCollector>>>,
-            compute_budget.to_owned(),            //execution_cost: SVMTransactionExecutionCost,
-            SVMTransactionExecutionCost::Default, //SVMTransactionExecutionCost ??
+            &mut transaction_context,  //&'a mut TransactionContext,,
+            &mut prog_cache,           //&'a mut ProgramCacheForTxBatch,
+            env,                       //EnvironmentConfig<'a>,
+            None,                      //Option<Rc<RefCell<LogCollector>>>,
+            compute_budget.to_owned(), //execution_cost: SVMTransactionExecutionCost,
         );
 
         // Get Timmings
@@ -103,7 +123,7 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
 
         //Get your message processor
 
-        let result_msg = MessageProcessor::process_message(
+        let result_msg = process_message(
             &sanitized.unwrap().message(), //&impl SVMMessage
             &vec![],                       //&[Vec<IndexOfAccount>]
             &mut invoke_context,           //&mut InvokeContext,
