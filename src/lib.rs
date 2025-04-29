@@ -1,8 +1,18 @@
 use error::SolanaClientExtError;
-use solana_client::rpc_config::RpcSimulateTransactionConfig;
+use solana_client::{rpc_client, rpc_config::RpcSimulateTransactionConfig};
+use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, message::Message, signers::Signers,
-    transaction::Transaction,
+    account::AccountSharedData,
+    compute_budget::ComputeBudgetInstruction,
+    message::Message,
+    signers::Signers,
+    transaction::{SanitizedTransaction, Transaction},
+    transaction_context::TransactionContext,
+};
+use {
+    solana_program_runtime::invoke_context::InvokeContext,
+    solana_svm_transaction::svm_message::SVMMessage,
+    solana_timings::{ExecuteDetailsTimings, ExecuteTimings},
 };
 mod error;
 
@@ -42,25 +52,60 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
         transaction: &Transaction,
         _signers: &'a I,
     ) -> Result<u64, Box<dyn std::error::Error + 'static>> {
-        let config = RpcSimulateTransactionConfig {
-            sig_verify: true,
-            ..RpcSimulateTransactionConfig::default()
-        };
-        let result = self.simulate_transaction_with_config(transaction, config)?;
+        // GET SVM MESSAGE
+        let sanitized = SanitizedTransaction::try_from_legacy_transaction(
+            Transaction::from(transaction.clone()),
+            &HashSet::new(),
+        );
 
-        let consumed_cu = result.value.units_consumed.ok_or(Box::new(
-            SolanaClientExtError::ComputeUnitsError(
-                "Missing Compute Units from simulation.".into(),
-            ),
-        ))?;
-
-        if consumed_cu == 0 {
-            return Err(Box::new(SolanaClientExtError::RpcError(
-                "Transaction simulation failed.".into(),
-            )));
+        //Get pubkeys from Tx
+        let accounts = transaction.message.account_keys;
+        //call PRC client to get account shared
+        let mut accounts_data = vec![];
+        for key in accounts {
+            let data: AccountSharedData = self.get_account(&key).unwrap().into();
+            accounts_data.push(data);
         }
 
-        Ok(consumed_cu)
+        // Get Invoke context
+        let mut transaction_context = TransactionContext::new(accounts_data, Rent::default(), 0, 0);
+        let mut prog_cache = ProgramCacheForTxBatch::new(
+            Slot::default(), //Slot
+            //enviorements
+            ProgramRuntimeEnvironments {
+                program_runtime_v1: runtime_env.clone(),
+                program_runtime_v2: runtime_env,
+            },
+            None,             //Option<ProgramRuntimeEnvironments>
+            Epoch::default(), //Epoch
+        );
+
+        let mut invoke_context = InvokeContext::new(
+            &mut transaction_context,             //&'a mut ProgramCacheForTxBatch,
+            &mut prog_cache,                      //&'a mut ProgramCacheForTxBatch,
+            env,                                  //EnvironmentConfig<'a>,
+            None,                                 //Option<Rc<RefCell<LogCollector>>>,
+            compute_budget.to_owned(),            //execution_cost: SVMTransactionExecutionCost,
+            SVMTransactionExecutionCost::Default, //SVMTransactionExecutionCost
+        );
+
+        // Get Timmings
+        let mut timings = ExecuteTimings::default();
+
+        //Get Used CUs
+        let mut used_cu = 0u64;
+
+        //Get your message processor
+
+        let result_msg = MessageProcessor::process_message(
+            &sanitized.unwrap().message(),
+            &vec![],
+            &mut invoke_context,
+            &mut timings,
+            &mut used_cu,
+        );
+
+        Ok(used_cu)
     }
 
     fn estimate_compute_units_msg<'a, I: Signers + ?Sized>(
@@ -116,7 +161,7 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
     /// and adds an instruction to the message to request
     /// only the required compute units from the ComputeBudget program
     /// to complete the transaction with this Message.
-    /// 
+    ///
     /// ```
     /// use solana_client::rpc_client::RpcClient;
     /// use solana_client_ext::RpcClientExt;
@@ -146,8 +191,8 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
     ///         result
     ///     );
     /// }
-    /// 
-    /// 
+    ///
+    ///
     /// ```
     fn optimize_compute_units_msg<'a, I: Signers + ?Sized>(
         &self,
