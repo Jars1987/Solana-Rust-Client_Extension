@@ -9,8 +9,12 @@ use solana_sdk::{
     transaction::{SanitizedTransaction, Transaction},
     transaction_context::TransactionContext,
 };
+
 use {
-    solana_program_runtime::invoke_context::InvokeContext,
+    solana_program_runtime::{
+        invoke_context::{self, EnvironmentConfig, InvokeContext},
+        loaded_programs::{ProgramCacheForTxBatch, ProgramRuntimeEnvironments},
+    },
     solana_svm_transaction::svm_message::SVMMessage,
     solana_timings::{ExecuteDetailsTimings, ExecuteTimings},
 };
@@ -69,6 +73,8 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
 
         // Get Invoke context
         let mut transaction_context = TransactionContext::new(accounts_data, Rent::default(), 0, 0);
+
+        //Get prog_cache
         let mut prog_cache = ProgramCacheForTxBatch::new(
             Slot::default(), //Slot
             //enviorements
@@ -81,12 +87,12 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
         );
 
         let mut invoke_context = InvokeContext::new(
-            &mut transaction_context,             //&'a mut ProgramCacheForTxBatch,
+            &mut transaction_context,             //&'a mut TransactionContext,,
             &mut prog_cache,                      //&'a mut ProgramCacheForTxBatch,
             env,                                  //EnvironmentConfig<'a>,
             None,                                 //Option<Rc<RefCell<LogCollector>>>,
             compute_budget.to_owned(),            //execution_cost: SVMTransactionExecutionCost,
-            SVMTransactionExecutionCost::Default, //SVMTransactionExecutionCost
+            SVMTransactionExecutionCost::Default, //SVMTransactionExecutionCost ??
         );
 
         // Get Timmings
@@ -98,11 +104,11 @@ impl RpcClientExt for solana_client::rpc_client::RpcClient {
         //Get your message processor
 
         let result_msg = MessageProcessor::process_message(
-            &sanitized.unwrap().message(),
-            &vec![],
-            &mut invoke_context,
-            &mut timings,
-            &mut used_cu,
+            &sanitized.unwrap().message(), //&impl SVMMessage
+            &vec![],                       //&[Vec<IndexOfAccount>]
+            &mut invoke_context,           //&mut InvokeContext,
+            &mut timings,                  //&mut ExecuteTimings,
+            &mut used_cu,                  // &mut u64,
         );
 
         Ok(used_cu)
