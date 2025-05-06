@@ -9,13 +9,28 @@ keywords = ["solana", "rpc", "client", "transaction", "compute-units", "optimiza
 categories = ["solana"] # Optional: Category for crates.io browsing
 
 [dependencies]
-solana-client = "2.2.2"
+solana-client = "2.2.1"
+solana-program-runtime = "2.2.1"
+solana-compute-budget = "2.2.1"
+solana-pubkey = "2.2.1"
+solana-svm-transaction = "2.2.1"
+solana-timings = "2.2.1"
+solana-rent = "2.2.1"
+solana-message = "2.2.1"
+solana-clock = "2.2.1"
+solana-svm = "2.2.1"
+solana-transaction = "2.2.1"
+solana-account = "2.2.1"
+solana-transaction-context = "2.2.1"
+solana-signer = "2.2.1"
+solana-compute-budget-interface = "2.2.1"
+solana-bpf-loader-program = "2.2.1"
+agave-feature-set = "2.2.1"
+solana-fee-structure = "2.2.1"
+solana-hash = "2.2.1"
+
+[dev-dependencies]
 solana-sdk = { version = "2.2.2", features = ["default"] }
-solana-program-runtime = "2.2.2"
-solana-compute-budget = "2.2.2"
-solana-svm="2.2.2"
-solana-bpf-loader-program = "2.2.2"
-solana-svm-transaction = "2.2.2"
 
 
 [lib]
